@@ -66,6 +66,8 @@ P(x, y) is the probability of both events x and y occurring together, and P(x) a
 
 $\text{PMI}(x, y) = \log \frac{P(x, y)}{P(x)P(y)}$
 
+#### Example Token Extraction from the Fox dataset using PMI
+
 ![PMI Example](https://github.com/rayaneghilene/MLM_Pretraining/blob/main/Images/PMI_example.png)
 
 
