@@ -27,16 +27,32 @@ pip install -r requirements.txt
 
 
 ## Usage
+### Masked Language Modelling
+To train a model for masked Language Modelling run the following command:
+```ruby
+nohup python Pretraining.py 
+--model_path path_to_your_pretrained_model 
+--output_path Path_to_save_the_finetuned_model 
+--masking_strategy 'PMI' # or 'LDA', or 'BERTopic' 
+> Pretraining_logs.log 2>&1 &
+```
+
+You can visualize the training progress via terminal using the following command
+```ruby
+tail -f Pretraining_logs.log
+```
+
+### NLI Finetuning
 To Fine tune the pretrained model run the following command
 ```ruby
 nohup python fine_tune_nli.py 
 --model_path path_to_your_pretrained_model 
 --output_path Path_to_save_the_finetuned_model 
---dataset_name 'mnli', 'snli', or 'qnli' 
+--dataset_name 'mnli' # or 'snli', or 'qnli' 
 > Finetuning_logs.log 2>&1 &
 ```
 
-You can visualize the training progress via terminal using the following command
+You can visualize the finetuning progress via terminal using the following command
 ```ruby
 tail -f Finetuning_logs.log
 ```

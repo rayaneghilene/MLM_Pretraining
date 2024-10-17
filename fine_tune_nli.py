@@ -9,8 +9,6 @@ if torch.cuda.is_available():
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     torch.cuda.empty_cache()
 
-# model_path = "/data/ARENAS_Automatic_Extremist_Analysis/ARENAS_Automatic_Extremist_Analysis/ZSL/roBERTa/roberta_large_cetautomatix"
-
 def load_and_tokenize_dataset(tokenizer, dataset_name='mnli'):
     try:
         if dataset_name == 'mnli':
@@ -47,8 +45,6 @@ def load_and_tokenize_dataset(tokenizer, dataset_name='mnli'):
 def save_model(model, tokenizer, output_path):
     model.save_pretrained(output_path)
     tokenizer.save_pretrained(output_path)
-
-from transformers import Trainer, TrainingArguments
 
 def train_model(model, tokenizer, dataset_name, output_path, output_dir='./output', logging_dir='./logs'):
     train_dataset, eval_dataset = load_and_tokenize_dataset(tokenizer, dataset_name)
