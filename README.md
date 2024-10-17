@@ -30,8 +30,8 @@ pip install -r requirements.txt
 To train a model for masked Language Modelling run the following command:
 ```ruby
 nohup python Pretraining.py 
---model_path path_to_your_pretrained_model 
---output_path Path_to_save_the_finetuned_model 
+--model_name 'roberta' #or , 'bert', 'electra'
+--output_path Path_to_save_the_trained_model 
 --masking_strategy 'PMI' # or 'LDA', or 'BERTopic' 
 > Pretraining_logs.log 2>&1 &
 ```
