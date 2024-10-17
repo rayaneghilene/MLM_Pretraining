@@ -6,7 +6,7 @@ This repository contains the code for Artifact extraction, MLM Pretraining, and 
 
 
 
-## Usage
+## Installation
 
 Clone the repo using the following command:
 ```ruby
@@ -21,10 +21,25 @@ source myenv/bin/activate
 ```
 
 To install the requirements run the following command: 
-```bash
+```
 pip install -r requirements.txt
 ```
 
+
+## Usage
+To Fine tune the pretrained model run the following command
+```ruby
+nohup python fine_tune_nli.py 
+--model_path path_to_your_pretrained_model 
+--output_path Path_to_save_the_finetuned_model 
+--dataset_name 'mnli', 'snli', or 'qnli' 
+> Finetuning_logs.log 2>&1 &
+```
+
+You can visualize the training progress via terminal using the following command
+```ruby
+tail -f Finetuning_logs.log
+```
 
 
 ## Contributing
