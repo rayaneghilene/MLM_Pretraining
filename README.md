@@ -2,8 +2,7 @@
 
 This repository contains the code for Artifact extraction, MLM Pretraining, and Natural language inference Finetuning. An inference script is provided to test the tuned models. 
 
-<!-- ![Pretraining_pipeline](https://github.com/user-attachments/assets/08be893c-38e4-4674-8000-4982dccc70da) -->
-![Pretraining_pipeline](https://github.com/rayaneghilene/MLM_Pretraining/blob/main/Pretraining_pipeline.png)
+![Pretraining_pipeline](https://github.com/rayaneghilene/MLM_Pretraining/blob/main/Images/Pretraining_pipeline.png)
 
 
 ## Installation
