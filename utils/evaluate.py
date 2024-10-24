@@ -180,41 +180,7 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
     # Convert PMI_df into a dictionary for fast lookup during training
     importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
 
-    # training_args = TrainingArguments(
-    #     output_dir='./output',
-    #     overwrite_output_dir=True,
-    #     num_train_epochs=10,
-    #     per_device_train_batch_size=8,
-    #     save_steps=10_000,
-    #     save_total_limit=2,
-    #     eval_strategy="epoch",
-    #     # eval_steps=10,
-    #     logging_dir='./logs',
-    #     logging_steps=100,
-    #     fp16=True,
-    #     learning_rate=2e-5,
-    #     weight_decay=0.01,
-    #     metric_for_best_model="accuracy",
-    # )
-    # if loss_strategy == 'weighted':
-    #     trainer = WeightedLossTrainer(
-    #         importance_scores=importance_scores,
-    #         model=model,
-    #         args=training_args,
-    #         train_dataset=dataset['train'],
-    #         eval_dataset=dataset['test'],
-    #         tokenizer=tokenizer
-    #     )
-    # else:
-    #     trainer = Trainer(
-    #         model=model,
-    #         args=training_args,
-    #         train_dataset=dataset['train'],
-    #         eval_dataset=dataset['test'] 
-    #     )
-    # trainer.train()
-    # save_model(model, tokenizer, save_path)
-        # Define parameter grid
+    # Define parameter grid
     param_grid = {
         'learning_rate': [5e-5, 2e-5, 1e-5],
         'weight_decay': [0.1, 0.01, 0.001],
@@ -271,22 +237,6 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
         # Evaluate the model on the validation set
         eval_result = trainer.evaluate()
         print("eval_result : ", eval_result)
-
-        # Check if this is the best model so far
-        # if eval_result['eval_accuracy'] > best_score:
-        #     best_score = eval_result['eval_accuracy']
-        #     best_model = model
-        #     best_params = {
-        #         'learning_rate': lr,
-        #         'weight_decay': wd,
-        #         'batch_size': batch_size,
-        #         'num_epochs': epochs
-        #     }
-        #     # Save the best model
-        #     print(f"Best Params: {best_params}")
-        #     print(f"Best Accuracy: {best_score}")
-        #     save_model(model, tokenizer, save_path)
-
         
         best_loss = float('inf')  # Initialize the best loss to infinity
         if eval_result['eval_loss'] < best_loss:
@@ -299,6 +249,6 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
                 'num_epochs': epochs
             }
             # Save the best model
-            print(f"Best Params: {best_params}")
-            print(f"Best Loss: {best_loss}")
-            save_model(best_model, tokenizer, save_path)
+    print(f"Best Params: {best_params}")
+    print(f"Best Loss: {best_loss}")
+    save_model(best_model, tokenizer, save_path)

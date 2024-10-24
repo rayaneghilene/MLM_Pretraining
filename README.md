@@ -72,6 +72,19 @@ You can visualize the finetuning progress via terminal using the following comma
 tail -f Supervised_logs.log
 ```
 
+### For Inference testing of a model
+Run the following command
+```ruby
+nohup python utils/Inference_test.py
+--model_path path_to_your_pretrained_model 
+--data_path Path_to_you_data
+> Inference_logs.log 2>&1 &
+```
+
+You can visualize the inference progress via terminal using the following command
+```ruby
+tail -f Inference_logs.log
+```
 
 
 ## How This works?
