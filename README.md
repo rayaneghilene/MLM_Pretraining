@@ -29,8 +29,9 @@ pip install -r requirements.txt
 ### Masked Language Modelling
 To train a model for masked Language Modelling run the following command:
 ```ruby
-nohup python Pretraining.py 
+nohup python main.py 
 --model_name 'roberta' #or , 'bert', 'electra'
+--dataset_path Path_to_the_dataset 
 --output_path Path_to_save_the_trained_model 
 --masking_strategy 'PMI' # or 'LDA', or 'BERTopic' 
 > Pretraining_logs.log 2>&1 &
@@ -44,7 +45,7 @@ tail -f Pretraining_logs.log
 ### NLI Finetuning
 To Fine tune the pretrained model run the following command
 ```ruby
-nohup python fine_tune_nli.py 
+nohup python models/fine_tune_nli.py 
 --model_path path_to_your_pretrained_model 
 --output_path Path_to_save_the_finetuned_model 
 --dataset_name 'mnli' # or 'snli', or 'qnli' 
@@ -56,6 +57,20 @@ You can visualize the finetuning progress via terminal using the following comma
 tail -f Finetuning_logs.log
 ```
 
+
+### Fine tune a model for Supervised Classification 
+To Fine tune the pretrained model run the following command
+```ruby
+nohup python models/Supervised_classification.py
+--model_path path_to_your_pretrained_model 
+--data_path Path_to_you_data
+> Supervised_logs.log 2>&1 &
+```
+
+You can visualize the finetuning progress via terminal using the following command
+```ruby
+tail -f Supervised_logs.log
+```
 
 
 

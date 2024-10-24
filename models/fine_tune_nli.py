@@ -2,6 +2,7 @@ import os
 import torch
 import argparse
 from datasets import load_dataset
+from utils.evaluate import load_and_tokenize_nli_dataset
 from transformers import Trainer, TrainingArguments
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -9,45 +10,12 @@ if torch.cuda.is_available():
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     torch.cuda.empty_cache()
 
-def load_and_tokenize_dataset(tokenizer, dataset_name='mnli'):
-    try:
-        if dataset_name == 'mnli':
-            dataset = load_dataset('glue', 'mnli')
-            train_dataset = dataset['train'] 
-            eval_dataset = dataset['validation_matched']
-        elif dataset_name == 'qnli':
-            dataset = load_dataset('glue', 'qnli')
-            train_dataset = dataset['train'] 
-            eval_dataset = dataset['validation']
-        elif dataset_name == 'snli':
-            dataset = load_dataset('snli')
-            train_dataset = dataset['train'] 
-            eval_dataset = dataset['validation']
-        else:
-            raise ValueError(f"Dataset '{dataset_name}' not supported")
-
-        # Tokenization and formatting
-        train_dataset = train_dataset.map(lambda examples: tokenizer(examples['premise'], examples['hypothesis'], 
-                                                         truncation=True, padding='max_length', max_length=128), 
-                              batched=True)
-        train_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
-
-        eval_dataset = eval_dataset.map(lambda examples: tokenizer(examples['premise'], examples['hypothesis'], 
-                                                         truncation=True, padding='max_length', max_length=128), 
-                              batched=True)
-        eval_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
-        return train_dataset, eval_dataset
-    
-    except Exception as e:
-        print(f"Dataset '{dataset_name}' unavailable or could not be loaded: {e}")
-        return None
-
 def save_model(model, tokenizer, output_path):
     model.save_pretrained(output_path)
     tokenizer.save_pretrained(output_path)
 
 def train_model(model, tokenizer, dataset_name, output_path, output_dir='./output', logging_dir='./logs'):
-    train_dataset, eval_dataset = load_and_tokenize_dataset(tokenizer, dataset_name)
+    train_dataset, eval_dataset = load_and_tokenize_nli_dataset(tokenizer, dataset_name)
 
     training_args = TrainingArguments(
         output_dir=output_dir,
