@@ -121,6 +121,15 @@ The process involves randomly masking a certain percentage of words in a given t
 Here the model is trained to predict the masked artifacts.
 
 
+In the dataset these masked tokens are replaced with a [MASK] token (<mask> for roBERTa), and the original tokens are stored as targets for prediction. 
+During preprocessing, labels are initialized to -100 for all tokens, indicating they should be ignored during loss calculation. For positions where tokens were masked, their corresponding token IDs are assigned as labels. The dataset is split into training and test sets, and the masked text, along with the labels, is prepared for model training.
+
+#### Example:
+
+**Tokenized text:** [CLS] token1 token2 token3 [MASK] token5 [SEP].
+
+**Label tensor:** [-100,   -100,     -100,   -100, Token_Id,-100, -100].
+
 ### IV. Finetuning For NLI
 To  use these models in a Zero-shot Setting, we finetune them on Natural Language Inference Datasets ```'mnli', 'qnli', and 'snli'```. This allows us to approach a multi class classification task with a Binary one, meaning that for each text we ask if the label is a match or not, and if it is how confident are we?
 
