@@ -105,8 +105,10 @@ def load_model(model_name='roberta'):
         model_name = 'FacebookAI/roberta-large'
     elif model_name == 'bert':
         model_name = 'bert-base-uncased'
-    elif model_name == 'electra':
+    elif model_name == 'electra-discriminator':
         model_name = 'google/electra-base-discriminator'
+    elif model_name == 'electra-generator':
+        model_name = 'google/electra-base-generator'
     else:
         raise ValueError(f"Model '{model_name}' not supported")
     
@@ -174,7 +176,6 @@ def load_and_tokenize_nli_dataset(tokenizer, dataset_name='mnli'):
 ## Train a model:
 def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, dataset_path):
     # Load dataset and PMI importance scores
-    # dataset, PMI_df = load_data(masking_strategy, tokenizer, dataset_path='/data/ARENAS_Automatic_Extremist_Analysis/ARENAS_Automatic_Extremist_Analysis/Data/SUD_data/fox_all.csv')
     dataset, PMI_df = load_data(masking_strategy, tokenizer, dataset_path)
     
     # Convert PMI_df into a dictionary for fast lookup during training
