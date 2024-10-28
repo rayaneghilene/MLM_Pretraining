@@ -118,7 +118,7 @@ def load_model(model_name='roberta'):
 
 ## Save a trained model and tokenizer:
 def save_model(model, tokenizer, output_path):
-    model.save_pretrained(output_path)
+    model.save_pretrained(output_path, safe_serialization=False)
     tokenizer.save_pretrained(output_path)
 
 ## Load a dataset and PMI importance scores:
@@ -185,9 +185,8 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
     param_grid = {
         'learning_rate': [5e-5, 2e-5, 1e-5],
         'weight_decay': [0.1, 0.01, 0.001],
-        'batch_size': [8, 16],
-        # 'num_epochs': [3, 5, 10]
-        'num_epochs': [1]
+        'batch_size': [64, 128],
+        'num_epochs': [3, 5],
     }
 
     # Track the best model and score
@@ -209,6 +208,8 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
             logging_dir='./logs',
             logging_steps=100,
             fp16=True,
+            # save_only_model=True,
+            save_safetensors=False,
             learning_rate=lr,
             weight_decay=wd,
             metric_for_best_model="accuracy",
@@ -224,7 +225,7 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
                 eval_dataset=dataset['test'],
                 tokenizer=tokenizer
             )
-        else:
+        elif loss_strategy == 'none':
             trainer = Trainer(
                 model=model,
                 args=training_args,
@@ -249,7 +250,10 @@ def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, da
                 'batch_size': batch_size,
                 'num_epochs': epochs
             }
-            # Save the best model
+        print(f"Model trained with LR={lr}, WD={wd}, BS={batch_size}, Epochs={epochs}.")
+        print(f"Validation Loss: {eval_result['eval_loss']}")
+    # Save the best model
     print(f"Best Params: {best_params}")
     print(f"Best Loss: {best_loss}")
-    save_model(best_model, tokenizer, save_path)
+    model_save_path = save_path + f"_lr_{best_params['learning_rate']}_wd_{best_params['weight_decay']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
+    save_model(best_model, tokenizer, model_save_path)
