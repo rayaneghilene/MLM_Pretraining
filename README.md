@@ -30,9 +30,9 @@ pip install -r requirements.txt
 To train a model for masked Language Modelling run the following command:
 ```ruby
 nohup python main.py 
---model_name 'roberta' #or , 'bert', 'electra'
+--model_name 'roberta' #or , 'bert', 'electra-generator', or 'electra-discriminator'
 --dataset_path Path_to_the_dataset 
---output_path Path_to_save_the_trained_model 
+--save_path Path_to_save_the_trained_model 
 --masking_strategy 'PMI' # or 'LDA', or 'BERTopic' 
 > Pretraining_logs.log 2>&1 &
 ```
