@@ -1,8 +1,36 @@
 # Artifact Pretraining and Finetuning of Masked Language Models for Zero-Shot Socially Unacceptable Discourse Classification
 
+> [!IMPORTANT]  
+> The argument parser has been modified in the latest update. Please review the documentation before running any scripts to ensure correct usage of the new arguments.
+
 This repository contains the code for Artifact extraction, MLM Pretraining, and Natural language inference Finetuning. An inference script is provided to test the tuned models. 
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/rayaneghilene/MLM_Pretraining/blob/main/LICENSE)
+
 ![Pretraining_pipeline](https://github.com/rayaneghilene/MLM_Pretraining/blob/main/Images/Pretraining_pipeline.png)
+
+## Table of Contents
+
+1. [Installation](#installation)
+2. [Usage](#usage)
+    - [Masked Language Modelling](#masked-language-modelling)
+    - [NLI Finetuning](#nli-finetuning)
+    - [Fine-tune a model for Supervised Classification](#fine-tune-a-model-for-supervised-classification)
+    - [For Inference testing of a model](#for-inference-testing-of-a-model)
+3. [How This Works](#how-this-works)
+    - [I. token-extraction](#i-token-extraction)
+      - [1. Pointwise mutual information (PMI) Token extraction](#1-pointwise-mutual-information-pmi-token-extraction)
+      - [Example Token Extraction from the Fox dataset using PMI](#example-token-extraction-from-the-fox-dataset-using-pmi)
+      - [2. BERTopic Similarity Token extraction](#2-bertopic-similarity-token-extraction)
+      - [3. Latent Dirichlet Allocation (LDA) Token extraction](#3-latent-dirichlet-allocation-lda-token-extraction)
+    - [II. Token Masking](#ii-token-masking)
+    - [III. Masked Language Modelling](#iii-masked-language-modelling)
+      - [Example](#example)
+    - [IV. Finetuning For NLI](#iv-finetuning-for-nli)
+4. [Acknowledgements](#acknowledgements)
+5. [Contributing](#contributing)
+6. [Contact](#contact)
+
 
 
 ## Installation
@@ -26,14 +54,30 @@ pip install -r requirements.txt
 
 
 ## Usage
+All experiments should be ran using the main.py file. The arguments are as follows:
+
+* `--experiment_name`: can be either 'train' for MLM training, or 'finetune_nli' $$\textcolor{red}{required}$$
+* `--model_name`: can be either 'roberta', 'bert', or 'electra'
+* `--pretrained_model_path`: is the Path to the pretrained model.
+* `--dataset_path`: is the Path to your dataset.
+* `--masking_strategy`: can be either 'PMI', 'LDA', or 'BERTopic (PMI is the default option)
+* `--loss_strategy`: is used for optimisation of the loss (with PMI or LDA..), and can be either 'weighted', or for no optimisation 'none' (weighted is the default option)
+* `--nli_dataset_name`: can be either 'mnli', 'qnli', or 'snli' ('mnli' is the default option)
+* `--save_path`: is the Path to save the pretrained model and tokenizer (the default path is ''./Trained_models/')
+
+
+
+
 ### Masked Language Modelling
-To train a model for masked Language Modelling run the following command:
+Here's an example command to train a model for masked Language Modelling:
+
 ```ruby
 nohup python main.py 
---model_name 'roberta' #or , 'bert', 'electra-generator', or 'electra-discriminator'
+--experiment_name 'train' 
+--model_name 'roberta'
 --dataset_path Path_to_the_dataset 
 --save_path Path_to_save_the_trained_model 
---masking_strategy 'PMI' # or 'LDA', or 'BERTopic' 
+--masking_strategy 'PMI'
 > Pretraining_logs.log 2>&1 &
 ```
 
@@ -43,12 +87,14 @@ tail -f Pretraining_logs.log
 ```
 
 ### NLI Finetuning
-To Fine tune the pretrained model run the following command
+Here's an example command to Fine tune a pretrained model for NLI:
+
 ```ruby
-nohup python models/fine_tune_nli.py 
+nohup python main.py 
+--experiment_name 'finetune_nli'
 --model_path path_to_your_pretrained_model 
---output_path Path_to_save_the_finetuned_model 
---dataset_name 'mnli' # or 'snli', or 'qnli' 
+--save_path Path_to_save_the_finetuned_model 
+--dataset_name 'mnli' 
 > Finetuning_logs.log 2>&1 &
 ```
 
@@ -59,11 +105,12 @@ tail -f Finetuning_logs.log
 
 
 ### Fine tune a model for Supervised Classification 
-To Fine tune the pretrained model run the following command
+Here's an example command to Fine tune a pretrained model in a supiervised fashion:
 ```ruby
-nohup python models/Supervised_classification.py
---model_path path_to_your_pretrained_model 
+nohup python main.py
+--pretrained_model_path path_to_your_pretrained_model 
 --data_path Path_to_you_data
+--save_path Path_to_save_the_finetuned_model
 > Supervised_logs.log 2>&1 &
 ```
 
@@ -135,6 +182,10 @@ To  use these models in a Zero-shot Setting, we finetune them on Natural Languag
 
 ## Acknowledgements
 This work was conducted as part of the European [Arenas](https://arenasproject.eu/) project, funded by Horizon Europe.
+It's objective is to characterize, measure, and understand the role of extremist narratives in discourses that have an impact not only on political and social spheres but importantly on the stakeholders themselves.  Leading an innovative and ambitious research program, ARENAS will significantly contribute to filling the gap in contemporary research, make recommendations to policymakers, media, lawyers, social inclusion professionals, and educational institutions, and propose solutions for countering extreme narratives for developing more inclusive and respectful European societies.
+
+![My Project](https://github.com/rayaneghilene/ARENAS/blob/main/DSML_Research_Project/Images/Arenas-final-GIF.gif)
+
 
 ## Contributing
 We welcome contributions from the community to enhance work. If you have ideas for features, improvements, or bug fixes, please submit a pull request or open an issue on GitHub.

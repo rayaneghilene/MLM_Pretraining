@@ -1,14 +1,23 @@
 from transformers import Trainer
 from sklearn.metrics import accuracy_score
-from transformers import AutoModelForMaskedLM, AutoTokenizer, Trainer, TrainingArguments
+from sklearn.metrics import  f1_score, classification_report
+from sklearn.model_selection import train_test_split
+from transformers import AutoModelForMaskedLM, AutoTokenizer, Trainer, TrainingArguments, AutoModelForSequenceClassification
 from Data.data_preparation import MLM_Dataset
 from Data.Extract_NPMI import NPMI
 import torch.nn.functional as F
 from itertools import product
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 import pandas as pd
+import numpy as np
 import torch
 import os
+from transformers import ElectraForMaskedLM, ElectraForPreTraining, AdamW, AutoTokenizer
+if torch.cuda.is_available():
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    torch.cuda.empty_cache()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class WeightedLossTrainer(Trainer):
     def __init__(self, importance_scores, *args, **kwargs):
@@ -105,10 +114,10 @@ def load_model(model_name='roberta'):
         model_name = 'FacebookAI/roberta-large'
     elif model_name == 'bert':
         model_name = 'bert-base-uncased'
-    elif model_name == 'electra-discriminator':
-        model_name = 'google/electra-base-discriminator'
-    elif model_name == 'electra-generator':
-        model_name = 'google/electra-base-generator'
+    # elif model_name == 'electra-discriminator':
+    #     model_name = 'google/electra-base-discriminator'
+    # elif model_name == 'electra-generator':
+    #     model_name = 'google/electra-base-generator'
     else:
         raise ValueError(f"Model '{model_name}' not supported")
     
@@ -174,86 +183,350 @@ def load_and_tokenize_nli_dataset(tokenizer, dataset_name='mnli'):
         return None
 
 ## Train a model:
-def train_model(model, tokenizer, loss_strategy, masking_strategy, save_path, dataset_path):
-    # Load dataset and PMI importance scores
-    dataset, PMI_df = load_data(masking_strategy, tokenizer, dataset_path)
-    
-    # Convert PMI_df into a dictionary for fast lookup during training
-    importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
+def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_path):
 
     # Define parameter grid
-    param_grid = {
-        'learning_rate': [5e-5, 2e-5, 1e-5],
-        'weight_decay': [0.1, 0.01, 0.001],
-        'batch_size': [64, 128],
-        'num_epochs': [3, 5],
-    }
-
+    param_grid = {'learning_rate': [5e-5, 2e-5, 1e-5],'weight_decay': [0.1, 0.01, 0.001],'batch_size': [64, 128],'num_epochs': [3, 5],}
     # Track the best model and score
     best_model = None
     best_score = float('-inf')
     best_params = {}
 
-    # Iterate over all parameter combinations
-    for lr, wd, batch_size, epochs in product(param_grid['learning_rate'], param_grid['weight_decay'], param_grid['batch_size'], param_grid['num_epochs']):
-        # Update the training arguments
-        training_args = TrainingArguments(
-            output_dir='./output',
-            overwrite_output_dir=True,
-            num_train_epochs=epochs,
-            per_device_train_batch_size=batch_size,
-            save_steps=10_000,
-            save_total_limit=2,
-            eval_strategy="epoch",
-            logging_dir='./logs',
-            logging_steps=100,
-            fp16=True,
-            # save_only_model=True,
-            save_safetensors=False,
-            learning_rate=lr,
-            weight_decay=wd,
-            metric_for_best_model="accuracy",
-        )
-        
-        # Choose trainer based on loss strategy
-        if loss_strategy == 'weighted':
-            trainer = WeightedLossTrainer(
-                importance_scores=importance_scores,
-                model=model,
-                args=training_args,
-                train_dataset=dataset['train'],
-                eval_dataset=dataset['test'],
-                tokenizer=tokenizer
-            )
-        elif loss_strategy == 'none':
-            trainer = Trainer(
-                model=model,
-                args=training_args,
-                train_dataset=dataset['train'],
-                eval_dataset=dataset['test'] 
-            )
+    
+    if model_name == 'electra':
+        generator = ElectraForMaskedLM.from_pretrained("google/electra-small-generator")
+        generator.to(device)
+        discriminator = ElectraForPreTraining.from_pretrained("google/electra-small-discriminator")
+        discriminator.to(device)
+        tokenizer = AutoTokenizer.from_pretrained("google/electra-small-discriminator")
+        dataset_path = '/data/ARENAS_Automatic_Extremist_Analysis/ARENAS_Automatic_Extremist_Analysis/PMI_extraction_test/test_datasets'
+        dataset, PMI_df = load_data('PMI', tokenizer, dataset_path)
+        importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
 
-        # Train the model
-        trainer.train()
+        train_dataset = dataset['train']
+        val_dataset = dataset['test']
+        for lr, batch_size, epochs in product(param_grid['learning_rate'], param_grid['batch_size'], param_grid['num_epochs']):
+            optimizer_G = AdamW(generator.parameters(), lr=5e-5)
+            optimizer_D = AdamW(discriminator.parameters(), lr=5e-5)
 
-        # Evaluate the model on the validation set
-        eval_result = trainer.evaluate()
-        print("eval_result : ", eval_result)
+            mlm_loss_fn = torch.nn.CrossEntropyLoss()  
+            replaced_loss_fn = torch.nn.BCEWithLogitsLoss()  # Binary Cross-Entropy Loss
+
+            ## Training Loop
+            train_indices = list(range(len(train_dataset)))
+
+            for epoch in range(epochs):
+                generator.train()
+                discriminator.train()
+
+                total_generator_loss = 0.0
+                total_discriminator_loss = 0.0
+                num_batches = 0
+
+                for i in range(0, len(train_dataset), batch_size):
+                    batch_indices = train_indices[i:i + batch_size]
+                    batch = [train_dataset[idx] for idx in batch_indices]
+                    input_ids = [item["input_ids"] for item in batch]
+                    attention_mask = [item["attention_mask"] for item in batch]
+                    labels = [item["labels"] for item in batch]
+
+                    # Padding and tensor conversion
+                    max_length = max([len(ids) for ids in input_ids])
+                    input_ids = [ids + [0] * (max_length - len(ids)) for ids in input_ids]
+                    attention_mask = [mask + [0] * (max_length - len(mask)) for mask in attention_mask]
+                    labels = [label + [0] * (max_length - len(label)) for label in labels]
+
+                    input_ids = torch.tensor(input_ids).to(device)
+                    attention_mask = torch.tensor(attention_mask).to(device)
+                    labels = torch.tensor(labels).to(device)
+
+                    # Generator training
+                    optimizer_G.zero_grad()
+                    generator_outputs = generator(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                    generator_loss = generator_outputs.loss
+                    generator_loss.backward()
+                    optimizer_G.step()
+
+                    # Replace masked tokens
+                    with torch.no_grad():
+                        predictions = generator_outputs.logits.argmax(dim=-1)
+                        replaced_input_ids = input_ids.clone()
+                        masked_positions = labels != -100
+                        replaced_input_ids[masked_positions] = predictions[masked_positions]
+
+                    # Discriminator training
+                    optimizer_D.zero_grad()
+                    discriminator_labels = (input_ids != replaced_input_ids).float()
+                    discriminator_outputs = discriminator(input_ids=replaced_input_ids, attention_mask=attention_mask)
+                    discriminator_loss = replaced_loss_fn(discriminator_outputs.logits.squeeze(-1), discriminator_labels)
+                    discriminator_loss.backward()
+                    optimizer_D.step()
+
+                    # Accumulate losses
+                    total_generator_loss += generator_loss.item()
+                    total_discriminator_loss += discriminator_loss.item()
+                    num_batches += 1
+                    print(f"Epoch {epoch + 1} | Eval Generator Loss: {generator_loss.item():.4f} | Eval Discriminator Loss: {discriminator_loss.item():.4f}")
+                avg_generator_loss = total_generator_loss / num_batches
+                avg_discriminator_loss = total_discriminator_loss / num_batches
+
+                print(f"Epoch {epoch + 1} | Final Generator Loss: {avg_generator_loss:.4f} | Final Discriminator Loss: {avg_discriminator_loss:.4f}")
+            ### Eval loop
+            val_indices = list(range(len(val_dataset)))
+
+            generator.eval()
+            discriminator.eval()
+
+            total_generator_loss = 0.0
+            total_discriminator_loss = 0.0
+            num_batches = 0
+
+            with torch.no_grad():
+                for i in range(0, len(val_dataset), batch_size):
+                    batch_indices = val_indices[i:i + batch_size]
+                    batch = [val_dataset[idx] for idx in batch_indices]
+                    input_ids = [item["input_ids"] for item in batch]
+                    attention_mask = [item["attention_mask"] for item in batch]
+                    labels = [item["labels"] for item in batch]
+
+                    # Padding and tensor conversion
+                    max_length = max([len(ids) for ids in input_ids])
+                    input_ids = [ids + [0] * (max_length - len(ids)) for ids in input_ids]
+                    attention_mask = [mask + [0] * (max_length - len(mask)) for mask in attention_mask]
+                    labels = [label + [0] * (max_length - len(label)) for label in labels]
+
+                    input_ids = torch.tensor(input_ids).to(device)
+                    attention_mask = torch.tensor(attention_mask).to(device)
+                    labels = torch.tensor(labels).to(device)
+
+                    # Generator evaluation
+                    generator_outputs = generator(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                    generator_loss = generator_outputs.loss
+
+                    # Replace masked tokens
+                    predictions = generator_outputs.logits.argmax(dim=-1)
+                    replaced_input_ids = input_ids.clone()
+                    masked_positions = labels != -100
+                    replaced_input_ids[masked_positions] = predictions[masked_positions]
+
+                    # Discriminator evaluation
+                    discriminator_labels = (input_ids != replaced_input_ids).float()
+                    discriminator_outputs = discriminator(input_ids=replaced_input_ids, attention_mask=attention_mask)
+                    discriminator_loss = replaced_loss_fn(discriminator_outputs.logits.squeeze(-1), discriminator_labels)
+                    print(f"Epoch {epoch + 1} | Eval Generator Loss: {generator_loss.item():.4f} | Eval Discriminator Loss: {discriminator_loss.item():.4f}")
+                    # Accumulate losses
+                    total_generator_loss += generator_loss.item()
+                    total_discriminator_loss += discriminator_loss.item()
+                    num_batches += 1
+                    
+            avg_generator_loss = total_generator_loss / num_batches
+            avg_discriminator_loss = total_discriminator_loss / num_batches
+
+            print(f"Validation | Final Generator Loss: {avg_generator_loss:.4f} | Final Discriminator Loss: {avg_discriminator_loss:.4f}")
+            avg_combined_eval_loss = (avg_generator_loss + avg_discriminator_loss) / 2
+            print(f"Validation | Avg Combined eval Loss: {avg_combined_eval_loss:.4f}")
+
+            best_loss = float('inf')  # Initialize the best loss to infinity
+            if avg_combined_eval_loss < best_loss:
+                best_loss = avg_combined_eval_loss
+                best_model = discriminator
+                best_params = {
+                    'learning_rate': lr,
+                    'batch_size': batch_size,
+                    'num_epochs': epochs
+                }
+            print(f"Model trained with LR={lr}, BS={batch_size}, Epochs={epochs}.")
+        # Save the best model
+        print(f"Best Params: {best_params}")
+        print(f"Best Loss: {best_loss}")
+        model_save_path = save_path + f"_lr_{best_params['learning_rate']}_wd_{best_params['weight_decay']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
+        save_model(best_model, tokenizer, model_save_path)
+    else:
+        # Iterate over all parameter combinations
+        model, tokenizer = load_model(model_name)
+        # Load dataset and PMI importance scores
+        dataset, PMI_df = load_data(masking_strategy, tokenizer, dataset_path)
+        # Convert PMI_df into a dictionary for fast lookup during training
+        importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
         
-        best_loss = float('inf')  # Initialize the best loss to infinity
-        if eval_result['eval_loss'] < best_loss:
-            best_loss = eval_result['eval_loss']
-            best_model = model
-            best_params = {
-                'learning_rate': lr,
-                'weight_decay': wd,
-                'batch_size': batch_size,
-                'num_epochs': epochs
-            }
-        print(f"Model trained with LR={lr}, WD={wd}, BS={batch_size}, Epochs={epochs}.")
-        print(f"Validation Loss: {eval_result['eval_loss']}")
-    # Save the best model
-    print(f"Best Params: {best_params}")
-    print(f"Best Loss: {best_loss}")
-    model_save_path = save_path + f"_lr_{best_params['learning_rate']}_wd_{best_params['weight_decay']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
-    save_model(best_model, tokenizer, model_save_path)
+        for lr, wd, batch_size, epochs in product(param_grid['learning_rate'], param_grid['weight_decay'], param_grid['batch_size'], param_grid['num_epochs']):
+            # Update the training arguments
+            training_args = TrainingArguments(
+                output_dir='./output',
+                overwrite_output_dir=True,
+                num_train_epochs=epochs,
+                per_device_train_batch_size=batch_size,
+                save_steps=10_000,
+                save_total_limit=2,
+                eval_strategy="epoch",
+                logging_dir='./logs',
+                logging_steps=100,
+                fp16=True,
+                # save_only_model=True,
+                save_safetensors=False,
+                learning_rate=lr,
+                weight_decay=wd,
+                metric_for_best_model="accuracy",
+            )
+            
+            # Choose trainer based on loss strategy
+            if loss_strategy == 'weighted':
+                trainer = WeightedLossTrainer(
+                    importance_scores=importance_scores,
+                    model=model,
+                    args=training_args,
+                    train_dataset=dataset['train'],
+                    eval_dataset=dataset['test'],
+                    tokenizer=tokenizer
+                )
+            elif loss_strategy == 'none':
+                trainer = Trainer(
+                    model=model,
+                    args=training_args,
+                    train_dataset=dataset['train'],
+                    eval_dataset=dataset['test'] 
+                )
+
+            # Train the model
+            trainer.train()
+
+            # Evaluate the model on the validation set
+            eval_result = trainer.evaluate()
+            print("eval_result : ", eval_result)
+            
+            best_loss = float('inf')  # Initialize the best loss to infinity
+            if eval_result['eval_loss'] < best_loss:
+                best_loss = eval_result['eval_loss']
+                best_model = model
+                best_params = {
+                    'learning_rate': lr,
+                    'weight_decay': wd,
+                    'batch_size': batch_size,
+                    'num_epochs': epochs
+                }
+            print(f"Model trained with LR={lr}, WD={wd}, BS={batch_size}, Epochs={epochs}.")
+            print(f"Validation Loss: {eval_result['eval_loss']}")
+        # Save the best model
+        print(f"Best Params: {best_params}")
+        print(f"Best Loss: {best_loss}")
+        model_save_path = save_path + model_name + f"_lr_{best_params['learning_rate']}_wd_{best_params['weight_decay']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
+        save_model(best_model, tokenizer, model_save_path)
+
+    
+def finetune_model(model_path, dataset_name, save_path, output_dir='./output', logging_dir='./logs'):
+    model = AutoModelForSequenceClassification.from_pretrained(model_path, num_labels=3) 
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    train_dataset, eval_dataset = load_and_tokenize_nli_dataset(tokenizer, dataset_name)
+
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+    overwrite_output_dir=True,
+        num_train_epochs=1,
+        per_device_train_batch_size=16,
+        save_steps=10_000,
+        save_total_limit=2,
+        eval_strategy="epoch",
+        save_only_model=True,
+    
+        save_safetensors=False,
+        logging_dir=logging_dir,
+        logging_steps=100,
+        fp16=True,
+        learning_rate=2e-5,
+        weight_decay=0.01,
+        metric_for_best_model="accuracy",
+    )
+
+    # Set up the trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset 
+    )
+
+    # Train the model
+    trainer.train()
+        
+    save_model(model, tokenizer, save_path)
+
+def finetune_supervised_classifier(model_path, data_path, save_path):
+    torch.cuda.empty_cache()
+    SEED = 42
+    train_percentage = 0.8
+    validation_percentage = 0.1
+    test_percentage = 0.1
+
+    
+    df = pd.read_csv(data_path)
+    distinct_count = df['class'].nunique()
+
+    model = AutoModelForSequenceClassification.from_pretrained(model_path, num_labels=distinct_count) 
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+    X = df.text.values
+    y = pd.get_dummies(df["class"])
+    labels = list(y.keys())
+    y = y.values 
+
+    X_train, X_rest, y_train , y_rest = train_test_split(X, y, test_size = 1 - train_percentage, train_size = train_percentage, random_state = SEED, shuffle = True, stratify = y)
+    X_valid, X_test, y_valid , y_test = train_test_split(X_rest, y_rest, test_size = test_percentage / (validation_percentage + test_percentage), train_size = validation_percentage / (validation_percentage + test_percentage), random_state = SEED, shuffle = True, stratify = y_rest)
+        
+    y_train = np.argmax(y_train, axis=1)
+    y_valid = np.argmax(y_valid, axis=1)
+
+    train_encodings = tokenizer(X_train.tolist(), truncation=True, padding=True, max_length=512)
+    valid_encodings = tokenizer(X_valid.tolist(), truncation=True, padding=True, max_length=512)
+    test_encodings = tokenizer(X_test.tolist(), truncation=True, padding=True, max_length=512)
+
+    # Create Hugging Face datasets
+    train_dataset = Dataset.from_dict({
+        'input_ids': train_encodings['input_ids'],
+        'attention_mask': train_encodings['attention_mask'],
+        'labels': y_train
+    })
+
+    eval_dataset = Dataset.from_dict({
+        'input_ids': valid_encodings['input_ids'],
+        'attention_mask': valid_encodings['attention_mask'],
+        'labels': y_valid
+    })
+    test_dataset = Dataset.from_dict({
+        'input_ids': test_encodings['input_ids'],
+        'attention_mask': test_encodings['attention_mask'],
+        'labels': np.argmax(y_test, axis=1) 
+    })
+
+    training_args = TrainingArguments(
+        output_dir='./outputs',
+        overwrite_output_dir=True,
+        num_train_epochs=3,
+        per_device_train_batch_size=16,
+        save_steps=10_000,
+        save_total_limit=2,
+        eval_strategy="epoch",
+        # eval_steps=100,
+        logging_dir='./logs',
+        logging_steps=100,
+        fp16=True,
+        learning_rate=2e-5,
+        weight_decay=0.01,
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+    )
+
+    trainer.train()
+
+    # Run inference (get predictions)
+    predictions = trainer.predict(test_dataset)
+    y_pred = np.argmax(predictions.predictions, axis=1)
+    print("Classification Report:")
+    print(classification_report(np.argmax(y_test, axis=1), y_pred, target_names=labels))
+    print("f1_score:", f1_score(np.argmax(y_test, axis=1), y_pred, average='macro'))
+
+    save_model(model, tokenizer, save_path)
