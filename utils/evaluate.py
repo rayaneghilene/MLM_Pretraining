@@ -57,7 +57,6 @@ class WeightedLossTrainer(Trainer):
                 if token in self.importance_scores:
                     importance_weights[i, j] = self.importance_scores[token]
         return importance_weights
-    from sklearn.metrics import accuracy_score
 
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
@@ -186,10 +185,17 @@ def load_and_tokenize_nli_dataset(tokenizer, dataset_name='mnli'):
 def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_path):
 
     # Define parameter grid
-    param_grid = {'learning_rate': [5e-5, 2e-5, 1e-5],'weight_decay': [0.1, 0.01, 0.001],'batch_size': [64, 128],'num_epochs': [3, 5],}
+    param_grid = {'learning_rate': [5e-5, 2e-5, 1e-5],
+                  'weight_decay': [0.1, 0.01, 0.001],
+                  'batch_size': [64, 128],
+                  'num_epochs': [3, 5],}
+    ## For quick testing use the followign param_grid:
+    # param_grid = {'learning_rate': [2e-5],
+    #               'weight_decay': [0.1],
+    #               'batch_size': [64],
+    #               'num_epochs': [3],}
     # Track the best model and score
     best_model = None
-    best_score = float('-inf')
     best_params = {}
 
     
@@ -201,8 +207,8 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
         tokenizer = AutoTokenizer.from_pretrained("google/electra-small-discriminator")
         dataset_path = '/data/ARENAS_Automatic_Extremist_Analysis/ARENAS_Automatic_Extremist_Analysis/PMI_extraction_test/test_datasets'
         dataset, PMI_df = load_data('PMI', tokenizer, dataset_path)
-        importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
-
+        # importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
+        importance_scores = dict(zip(PMI_df['token'], PMI_df['npmi']))
         train_dataset = dataset['train']
         val_dataset = dataset['test']
         for lr, batch_size, epochs in product(param_grid['learning_rate'], param_grid['batch_size'], param_grid['num_epochs']):
@@ -215,23 +221,23 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
             ## Training Loop
             train_indices = list(range(len(train_dataset)))
 
+            # Training Loop
             for epoch in range(epochs):
                 generator.train()
                 discriminator.train()
-
                 total_generator_loss = 0.0
                 total_discriminator_loss = 0.0
                 num_batches = 0
 
                 for i in range(0, len(train_dataset), batch_size):
+                    # Prepare batch
                     batch_indices = train_indices[i:i + batch_size]
                     batch = [train_dataset[idx] for idx in batch_indices]
                     input_ids = [item["input_ids"] for item in batch]
                     attention_mask = [item["attention_mask"] for item in batch]
                     labels = [item["labels"] for item in batch]
 
-                    # Padding and tensor conversion
-                    max_length = max([len(ids) for ids in input_ids])
+                    max_length = max(len(ids) for ids in input_ids)
                     input_ids = [ids + [0] * (max_length - len(ids)) for ids in input_ids]
                     attention_mask = [mask + [0] * (max_length - len(mask)) for mask in attention_mask]
                     labels = [label + [0] * (max_length - len(label)) for label in labels]
@@ -240,25 +246,36 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
                     attention_mask = torch.tensor(attention_mask).to(device)
                     labels = torch.tensor(labels).to(device)
 
-                    # Generator training
+                    # Train the generator
                     optimizer_G.zero_grad()
                     generator_outputs = generator(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                    generator_loss = generator_outputs.loss
+                    ## If you're reading this, thank you for reviewing the code!
+                    if loss_strategy == 'weighted':
+                        generator_loss = compute_weighted_loss(
+                            logits=generator_outputs.logits,
+                            labels=labels,
+                            input_ids=input_ids,
+                            tokenizer=tokenizer,
+                            importance_scores=importance_scores  # Pass the dictionary
+                        )
+                    elif loss_strategy == 'none':
+                        generator_loss = generator_outputs.loss
                     generator_loss.backward()
                     optimizer_G.step()
 
-                    # Replace masked tokens
+                    # Train the discriminator
                     with torch.no_grad():
                         predictions = generator_outputs.logits.argmax(dim=-1)
                         replaced_input_ids = input_ids.clone()
                         masked_positions = labels != -100
                         replaced_input_ids[masked_positions] = predictions[masked_positions]
 
-                    # Discriminator training
                     optimizer_D.zero_grad()
                     discriminator_labels = (input_ids != replaced_input_ids).float()
-                    discriminator_outputs = discriminator(input_ids=replaced_input_ids, attention_mask=attention_mask)
-                    discriminator_loss = replaced_loss_fn(discriminator_outputs.logits.squeeze(-1), discriminator_labels)
+                    discriminator_outputs = discriminator(input_ids=replaced_input_ids, attention_mask=attention_mask)       
+                    discriminator_loss = F.binary_cross_entropy_with_logits(
+                        discriminator_outputs.logits.squeeze(-1), discriminator_labels
+                    )
                     discriminator_loss.backward()
                     optimizer_D.step()
 
@@ -339,7 +356,7 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
         # Save the best model
         print(f"Best Params: {best_params}")
         print(f"Best Loss: {best_loss}")
-        model_save_path = save_path + f"_lr_{best_params['learning_rate']}_wd_{best_params['weight_decay']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
+        model_save_path = save_path + f"_lr_{best_params['learning_rate']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
         save_model(best_model, tokenizer, model_save_path)
     else:
         # Iterate over all parameter combinations
@@ -449,6 +466,49 @@ def finetune_model(model_path, dataset_name, save_path, output_dir='./output', l
     trainer.train()
         
     save_model(model, tokenizer, save_path)
+
+
+### electra
+def get_importance_weights(input_ids, tokenizer, importance_scores):
+    """
+    Compute importance weights for input tokens using importance scores from a dictionary.
+    """
+    importance_weights = torch.ones_like(input_ids, dtype=torch.float)
+    for i, input_id_sequence in enumerate(input_ids):
+        tokens = tokenizer.convert_ids_to_tokens(input_id_sequence)
+        for j, token in enumerate(tokens):
+            if token in importance_scores:
+                importance_weights[i, j] = importance_scores[token]
+    return importance_weights
+
+
+def compute_weighted_loss(logits, labels, input_ids, tokenizer, importance_scores):
+    """
+    Compute weighted loss for ELECTRA training.
+    """
+    vocab_size = logits.size(-1)
+    log_probs = F.log_softmax(logits.view(-1, vocab_size), dim=-1)
+    
+    # Negative Log Likelihood loss
+    masked_lm_loss = F.nll_loss(
+        log_probs,
+        labels.view(-1),
+        reduction="none",  # Compute per-token loss
+        ignore_index=-100  # Ignore non-masked tokens
+    )
+    
+    # Compute importance weights
+    importance_weights = get_importance_weights(input_ids, tokenizer, importance_scores)
+    
+    # Mask out positions where label is -100
+    active_loss = labels.view(-1) != -100
+    active_loss = active_loss.float()
+    
+    # Apply weights and compute final loss
+    weighted_loss = (masked_lm_loss * importance_weights.view(-1) * active_loss).sum() / active_loss.sum()
+    return weighted_loss
+
+
 
 def finetune_supervised_classifier(model_path, data_path, save_path):
     torch.cuda.empty_cache()
