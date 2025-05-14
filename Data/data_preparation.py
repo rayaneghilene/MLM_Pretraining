@@ -53,7 +53,6 @@ class MLM_Dataset:
         
         for i, tokens_to_predict in enumerate(examples['tokens_to_predict']):
             # print("The tokens to predict are:", tokens_to_predict)
-
             # Convert tokens_to_predict to token IDs
             token_ids = self.tokenizer.convert_tokens_to_ids(tokens_to_predict)
 

@@ -6,3 +6,5 @@ datasets==3.0.0
 torch==2.4.
 gensim==4.3.3
 pyLDAvis==3.4.1
+bertopic
+nltk

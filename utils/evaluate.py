@@ -1,199 +1,32 @@
-from transformers import Trainer
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import  f1_score, classification_report
-from sklearn.model_selection import train_test_split
-from transformers import AutoModelForMaskedLM, AutoTokenizer, Trainer, TrainingArguments, AutoModelForSequenceClassification
-from Data.data_preparation import MLM_Dataset
-from Data.Extract_NPMI import NPMI
-import torch.nn.functional as F
-from itertools import product
-from datasets import load_dataset, Dataset
-import pandas as pd
-import numpy as np
-import torch
 import os
+import json
+import torch
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from itertools import product
+import torch.nn.functional as F
+from datasets import load_dataset, Dataset
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import  f1_score, classification_report
+from transformers import  AutoTokenizer, Trainer, TrainingArguments, AutoModelForSequenceClassification
 from transformers import ElectraForMaskedLM, ElectraForPreTraining, AdamW, AutoTokenizer
-if torch.cuda.is_available():
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    torch.cuda.empty_cache()
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-class WeightedLossTrainer(Trainer):
-    def __init__(self, importance_scores, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.importance_scores = importance_scores
-
-    def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.get("labels")
-        outputs = model(**inputs)
-        logits = outputs.logits
-        # Ensure the logits are of the correct shape (batch_size, sequence_length, vocab_size)
-        vocab_size = logits.size(-1)
-        # Flatten the logits and labels for compatibility with F.nll_loss
-        log_probs = F.log_softmax(logits.view(-1, vocab_size), dim=-1)
-        # Calculate NLL loss (Negative Log Likelihood) for MLM task
-        masked_lm_loss = F.nll_loss(
-            log_probs,
-            labels.view(-1),
-            reduction='none',  # Compute loss for each token separately
-            ignore_index=-100 
-        )
-        # Apply importance weights to masked tokens 
-        importance_weights = self.get_importance_weights(inputs['input_ids'])
-        # Mask out the positions where label is -100
-        active_loss = labels.view(-1) != -100
-        active_loss = active_loss.float()
-        # Apply the importance weights and mask
-        weighted_loss = (masked_lm_loss * importance_weights.view(-1) * active_loss).sum() / active_loss.sum()
-        return (weighted_loss, outputs) if return_outputs else weighted_loss
-
-    def get_importance_weights(self, input_ids):
-        # Align tokens with their importance scores
-        importance_weights = torch.ones_like(input_ids, dtype=torch.float)
-        for i, input_id_sequence in enumerate(input_ids):
-            tokens = self.tokenizer.convert_ids_to_tokens(input_id_sequence)
-            for j, token in enumerate(tokens):
-                if token in self.importance_scores:
-                    importance_weights[i, j] = self.importance_scores[token]
-        return importance_weights
-
-    def compute_metrics(eval_pred):
-        logits, labels = eval_pred
-        # Convert logits to predictions (choose the class with highest probability)
-        predictions = logits.argmax(dim=-1)
-        # Compute accuracy using sklearn's accuracy_score
-        accuracy = accuracy_score(labels.flatten(), predictions.flatten())
-        return {"accuracy": accuracy}
-
-### Methods:
-def get_csv(path):
-    try:
-        # Check if the path is a file
-        if os.path.isfile(path):
-            # Check if it's a CSV file
-            if path.endswith('.csv'):
-                print(f"Processing single CSV file: {path}")
-                df = pd.read_csv(path)
-                return df
-            else:
-                raise ValueError("The provided file is not a CSV.")
-        
-        # Check if the path is a directory
-        elif os.path.isdir(path):
-            print(f"Processing directory: {path}")
-            all_dfs = []  
-            # Iterate over files in the folder
-            for filename in os.listdir(path):
-                file_path = os.path.join(path, filename)
-                if os.path.isfile(file_path) and file_path.endswith('.csv'):
-                    print(f"Processing CSV file: {file_path}")
-                    df = pd.read_csv(file_path)
-                    all_dfs.append(df)  # Append each dataframe to the list
-                else:
-                    print(f"Skipping non-CSV file: {file_path}")
-
-            # Merge all dataframes into one
-            if all_dfs:
-                merged_df = pd.concat(all_dfs, ignore_index=True)
-                print(f"All CSV files merged into a single DataFrame with {len(merged_df)} rows.")
-                return merged_df
-            else:
-                raise ValueError("No valid CSV files found in the directory.")
-
-        else:
-            raise FileNotFoundError(f"Invalid path: {path}")
-    
-    except Exception as e:
-        print(f"Error: {e}")
-
-## load a trained model and tokenizer:
-def load_model(model_name='roberta'):
-    if model_name == 'roberta':
-        model_name = 'FacebookAI/roberta-large'
-    elif model_name == 'bert':
-        model_name = 'bert-base-uncased'
-    # elif model_name == 'electra-discriminator':
-    #     model_name = 'google/electra-base-discriminator'
-    # elif model_name == 'electra-generator':
-    #     model_name = 'google/electra-base-generator'
-    else:
-        raise ValueError(f"Model '{model_name}' not supported")
-    
-    model = AutoModelForMaskedLM.from_pretrained(model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name, pad_to_multiple_of=8)
-    return model, tokenizer
-
-## Save a trained model and tokenizer:
-def save_model(model, tokenizer, output_path):
-    model.save_pretrained(output_path, safe_serialization=False)
-    tokenizer.save_pretrained(output_path)
-
-## Load a dataset and PMI importance scores:
-def load_data(masking_strategy, tokenizer, dataset_path):
-    df = get_csv(dataset_path)
-    # df = pd.read_csv(dataset_path)
-    if masking_strategy == 'PMI':
-        npmi_calculator = NPMI()
-        Importance_scores_df = npmi_calculator.extract_npmi_for_dataset(df, text_column='text', class_column='class')
-    # elif masking_strategy == 'LDA':
-    #     Masks = LDA_masks
-    # elif masking_strategy == 'BERTopic':
-    #     Masks = BERTopic_masks
-    else:
-        raise ValueError(f"Masking strategy '{masking_strategy}' not supported")
-    
-    mlm_dataset = MLM_Dataset(dataframe=df, tokenizer=tokenizer, mask_prob=0.15)
-    dataset_dict = mlm_dataset.get_dataset()
-    return dataset_dict, Importance_scores_df
-
-## Load and tokenize a dataset for NLI:
-def load_and_tokenize_nli_dataset(tokenizer, dataset_name='mnli'):
-    try:
-        if dataset_name == 'mnli':
-            dataset = load_dataset('glue', 'mnli')
-            train_dataset = dataset['train'] 
-            eval_dataset = dataset['validation_matched']
-        elif dataset_name == 'qnli':
-            dataset = load_dataset('glue', 'qnli')
-            train_dataset = dataset['train'] 
-            eval_dataset = dataset['validation']
-        elif dataset_name == 'snli':
-            dataset = load_dataset('snli')
-            train_dataset = dataset['train'] 
-            eval_dataset = dataset['validation']
-        else:
-            raise ValueError(f"Dataset '{dataset_name}' not supported")
-
-        # Tokenization and formatting
-        train_dataset = train_dataset.map(lambda examples: tokenizer(examples['premise'], examples['hypothesis'], 
-                                                         truncation=True, padding='max_length', max_length=128), 
-                              batched=True)
-        train_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
-
-        eval_dataset = eval_dataset.map(lambda examples: tokenizer(examples['premise'], examples['hypothesis'], 
-                                                         truncation=True, padding='max_length', max_length=128), 
-                              batched=True)
-        eval_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'label'])
-        return train_dataset, eval_dataset
-    
-    except Exception as e:
-        print(f"Dataset '{dataset_name}' unavailable or could not be loaded: {e}")
-        return None
+from utils.WeightedLossTrainer import WeightedLossTrainer
+from utils.helper_methods import save_model, load_model, get_csv, load_and_tokenize_nli_dataset, load_data
 
 ## Train a model:
-def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_path):
+def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_path, device):
 
     # Define parameter grid
-    param_grid = {'learning_rate': [5e-5, 2e-5, 1e-5],
-                  'weight_decay': [0.1, 0.01, 0.001],
-                  'batch_size': [64, 128],
-                  'num_epochs': [3, 5],}
+    # param_grid = {'learning_rate': [5e-5, 2e-5, 1e-5],
+    #               'weight_decay': [0.1, 0.01, 0.001],
+    #               'batch_size': [64, 128],
+    #               'num_epochs': [3, 5],}
     ## For quick testing use the followign param_grid:
-    # param_grid = {'learning_rate': [2e-5],
-    #               'weight_decay': [0.1],
-    #               'batch_size': [64],
-    #               'num_epochs': [3],}
+    param_grid = {'learning_rate': [5e-5],
+                  'weight_decay': [0.01],
+                  'batch_size': [128],
+                  'num_epochs': [5],}
     # Track the best model and score
     best_model = None
     best_params = {}
@@ -206,9 +39,9 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
         discriminator.to(device)
         tokenizer = AutoTokenizer.from_pretrained("google/electra-small-discriminator")
         dataset_path = '/data/ARENAS_Automatic_Extremist_Analysis/ARENAS_Automatic_Extremist_Analysis/PMI_extraction_test/test_datasets'
-        dataset, PMI_df = load_data('PMI', tokenizer, dataset_path)
+        dataset, Importance_df = load_data('PMI', tokenizer, dataset_path)
         # importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
-        importance_scores = dict(zip(PMI_df['token'], PMI_df['npmi']))
+        importance_scores = dict(zip(Importance_df['token'], Importance_df['score']))
         train_dataset = dataset['train']
         val_dataset = dataset['test']
         for lr, batch_size, epochs in product(param_grid['learning_rate'], param_grid['batch_size'], param_grid['num_epochs']):
@@ -358,13 +191,13 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
         print(f"Best Loss: {best_loss}")
         model_save_path = save_path + f"_lr_{best_params['learning_rate']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
         save_model(best_model, tokenizer, model_save_path)
-    else:
+    else: ## This is to train a roberta or bert 
         # Iterate over all parameter combinations
         model, tokenizer = load_model(model_name)
         # Load dataset and PMI importance scores
-        dataset, PMI_df = load_data(masking_strategy, tokenizer, dataset_path)
+        dataset, importance_df = load_data(masking_strategy, tokenizer, dataset_path)
         # Convert PMI_df into a dictionary for fast lookup during training
-        importance_scores = {row['token']: row['npmi'] for _, row in PMI_df.iterrows()}
+        importance_scores = {row['token']: row['score'] for _, row in importance_df.iterrows()}
         
         for lr, wd, batch_size, epochs in product(param_grid['learning_rate'], param_grid['weight_decay'], param_grid['batch_size'], param_grid['num_epochs']):
             # Update the training arguments
@@ -384,6 +217,9 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
                 learning_rate=lr,
                 weight_decay=wd,
                 metric_for_best_model="accuracy",
+                optim="adamw_torch",  
+                gradient_accumulation_steps=2,  # Helps smooth updates
+                max_grad_norm=1.0,
             )
             
             # Choose trainer based on loss strategy
@@ -394,8 +230,7 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
                     args=training_args,
                     train_dataset=dataset['train'],
                     eval_dataset=dataset['test'],
-                    tokenizer=tokenizer
-                )
+                    tokenizer=tokenizer) 
             elif loss_strategy == 'none':
                 trainer = Trainer(
                     model=model,
@@ -405,7 +240,12 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
                 )
 
             # Train the model
-            trainer.train()
+            try:
+                trainer.train()
+            except KeyboardInterrupt:
+                print("Training stopped early due to overfitting.")
+
+            # trainer.train()
 
             # Evaluate the model on the validation set
             eval_result = trainer.evaluate()
@@ -419,7 +259,7 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
                     'learning_rate': lr,
                     'weight_decay': wd,
                     'batch_size': batch_size,
-                    'num_epochs': epochs
+                    'num_epochs': epochs #epochs  # Actual number of epochs run 
                 }
             print(f"Model trained with LR={lr}, WD={wd}, BS={batch_size}, Epochs={epochs}.")
             print(f"Validation Loss: {eval_result['eval_loss']}")
@@ -428,8 +268,15 @@ def train_model(model_name, loss_strategy, masking_strategy, save_path, dataset_
         print(f"Best Loss: {best_loss}")
         model_save_path = save_path + model_name + f"_lr_{best_params['learning_rate']}_wd_{best_params['weight_decay']}_bs_{best_params['batch_size']}_epochs_{best_params['num_epochs']}"
         save_model(best_model, tokenizer, model_save_path)
+        # Save the loss history as a JSON file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        loss_save_path = os.path.join(save_path, f"{model_name}_loss_history_{timestamp}.json")
 
-    
+        # loss_save_path = save_path + model_name + "_loss_history.json"
+        with open(loss_save_path, "w") as f:
+            json.dump(trainer.loss_history, f)
+        print(f"Loss values saved at {loss_save_path}")
+
 def finetune_model(model_path, dataset_name, save_path, output_dir='./output', logging_dir='./logs'):
     model = AutoModelForSequenceClassification.from_pretrained(model_path, num_labels=3) 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -437,7 +284,7 @@ def finetune_model(model_path, dataset_name, save_path, output_dir='./output', l
 
     training_args = TrainingArguments(
         output_dir=output_dir,
-    overwrite_output_dir=True,
+        overwrite_output_dir=True,
         num_train_epochs=1,
         per_device_train_batch_size=16,
         save_steps=10_000,
@@ -467,7 +314,6 @@ def finetune_model(model_path, dataset_name, save_path, output_dir='./output', l
         
     save_model(model, tokenizer, save_path)
 
-
 ### electra
 def get_importance_weights(input_ids, tokenizer, importance_scores):
     """
@@ -480,7 +326,6 @@ def get_importance_weights(input_ids, tokenizer, importance_scores):
             if token in importance_scores:
                 importance_weights[i, j] = importance_scores[token]
     return importance_weights
-
 
 def compute_weighted_loss(logits, labels, input_ids, tokenizer, importance_scores):
     """
@@ -508,9 +353,7 @@ def compute_weighted_loss(logits, labels, input_ids, tokenizer, importance_score
     weighted_loss = (masked_lm_loss * importance_weights.view(-1) * active_loss).sum() / active_loss.sum()
     return weighted_loss
 
-
-
-def finetune_supervised_classifier(model_path, data_path, save_path):
+def finetune_supervised_classifier(model_path, dataset_path, save_path):
     torch.cuda.empty_cache()
     SEED = 42
     train_percentage = 0.8
@@ -518,7 +361,7 @@ def finetune_supervised_classifier(model_path, data_path, save_path):
     test_percentage = 0.1
 
     
-    df = pd.read_csv(data_path)
+    df = pd.read_csv(dataset_path)
     distinct_count = df['class'].nunique()
 
     model = AutoModelForSequenceClassification.from_pretrained(model_path, num_labels=distinct_count) 
@@ -571,6 +414,7 @@ def finetune_supervised_classifier(model_path, data_path, save_path):
         fp16=True,
         learning_rate=2e-5,
         weight_decay=0.01,
+        remove_unused_columns=False,
     )
 
     trainer = Trainer(

@@ -68,11 +68,13 @@ class NPMI:
         for class_label, token_counts in class_token_counts.items():
             class_npmi_scores = self.compute_npmi(token_counts, class_totals[class_label], overall_token_counts, total_tokens)
             for token, npmi_score in class_npmi_scores.items():
-                token_npmi_scores[token].append(npmi_score)
+                # scaling  between 0 and 1
+                scaled_npmi_score = (npmi_score + 1) / 2
+                token_npmi_scores[token].append(scaled_npmi_score)
         
         # Average NPMI scores for tokens across classes
         avg_npmi_scores = {token: sum(scores) / len(scores) for token, scores in token_npmi_scores.items()}
-        
+
         # Create a dataframe from the averaged NPMI scores
         npmi_df = pd.DataFrame(list(avg_npmi_scores.items()), columns=['token', 'npmi'])
         
