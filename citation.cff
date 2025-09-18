@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "[MASK]ED - Language Modeling for Explainable Classification and Disentangling of Socially Unacceptable Discourse."
+authors:
+  - family-names: "Ghilene"
+    given-names: "Mohamed Rayane"
+    orcid: https://orcid.org/0009-0006-4849-3432
+  - family-names: "Niaouri"
+    given-names: "Dimitra"
+    orcid: https://orcid.org/0009-0004-7407-9417
+  - family-names: "Linardi"
+    given-names: "Michele"
+    orcid: https://orcid.org/0000-0002-3249-2068
+  - family-names: "Longhi"
+    given-names: "Julien"
+    orcid: https://orcid.org/0000-0002-4134-9888
+version: "1.0.0"
+date-released: "2025-09-18"
+url: "https://github.com/rayaneghilene/MLM_Pretraining"
+license: "CC-BY-4.0"

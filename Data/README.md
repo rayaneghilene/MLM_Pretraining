@@ -36,6 +36,27 @@ This ensures that the scores are bounded, making them more comparable across dif
 
 
 
+## 2. BERTopic 
+
+The `Extract_BERTopic.py` file processes a text dataset using **BERTopic** topic modeling to extract important topic tokens and their relevance scores. It then expands these tokens into subword units using the **BERT tokenizer**, assigning the original token’s score to each subword. This helps prepare fine-grained token-level scores for downstream tasks like masked language modeling or token filtering.
+
+It follows the followng steps:
+- Fits BERTopic model on input text data.
+- Extracts topic tokens and calculates normalized relevance scores.
+- Removes stopwords to focus on meaningful tokens.
+- Averages token scores across topics.
+- Uses BERT tokenizer to split tokens into subwords.
+- Assigns average scores to each subword.
+- Saves both original token scores and expanded subword scores as CSV files.
+
+You can run the script seperatly and extract BERTopic scors using the following arguments:
+
+```bash
+python your_script.py --dataset_path path/to/input_dataset.csv --output_path path/to/bertopic_scores.csv --expanded_output_path path/to/expanded_token_scores.csv
+```
+
+
+
 
 ## Contribution
 

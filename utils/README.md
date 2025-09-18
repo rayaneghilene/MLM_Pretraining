@@ -37,6 +37,7 @@ Here:
 
 This sums up the weighted losses over all tokens and normalizes by the total number of non-masked tokens (where  $`\text{active\_loss}(i)=1`$).
 
+
 ## Contribution
 
 Please If there are any errors, bugs, or inconsistencies, submit a pull request, or directly reach out to rayane.ghilene@ensea.fr

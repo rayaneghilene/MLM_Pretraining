@@ -1,9 +1,9 @@
-# [MASK]ed Language Modeling using Socially Unacceptable Discourse Artifacts
-
+# [MASK]ED - Language Modeling for Explainable Classification and Disentangling of Socially Unacceptable Discourse.
+<!-- 
 > [!NOTE]  
-> The argument parser has been modified in the latest update. Please review the documentation before running any scripts to ensure correct usage of the new arguments.
+> The argument parser has been modified in the latest update. Please review the documentation before running any scripts to ensure correct usage of the new arguments. -->
 
-This repository contains the code for Token Importance Assessment, Masked Language Modeling (MLM) Pretraining, and Natural Language Inference (NLI) Finetuning. An inference script is provided to test the tuned models. 
+This repository contains the code for Token Importance Assessment, Masked Language Modeling (MLM) Pretraining and Finetuning, Label Noise Removal, and Annotated Corpus relabeling. An inference script is provided to test the tuned models. 
 
 ![Pipeline](https://github.com/user-attachments/assets/40a57d06-b2f0-43a9-8868-e0d545fcafe5#gh-light-mode-only)
 ![Pipeline](https://github.com/user-attachments/assets/ed5e10f2-85a1-493a-9dcb-53ae0909e94b#gh-dark-mode-only)
@@ -12,7 +12,6 @@ This repository contains the code for Token Importance Assessment, Masked Langua
 1. [Installation](#installation)
 2. [Usage](#usage)  
    - [Masked Language Modelling](#masked-language-modelling)  
-   - [NLI Finetuning](#nli-finetuning)  
    - [Fine-tune a Model for Supervised Classification](#fine-tune-a-model-for-supervised-classification)  
    - [Inference Testing](#for-inference-testing-of-a-model)  
 3. [Token Importance Assessment](#i-token-importance-assessment)
@@ -78,7 +77,7 @@ nohup python main.py
 > Pretraining_logs.log 2>&1 &
 ```
 
-You can visualize the training progress via terminal using the following command
+<!-- You can visualize the training progress via terminal using the following command
 ```ruby
 tail -f Pretraining_logs.log
 ```
@@ -99,7 +98,7 @@ nohup python main.py
 You can visualize the finetuning progress via terminal using the following command
 ```ruby
 tail -f Finetuning_logs.log
-```
+``` -->
 
 
 ### Fine tune a model for Supervised Classification 
@@ -117,6 +116,8 @@ You can visualize the finetuning progress via terminal using the following comma
 ```ruby
 tail -f Supervised_logs.log
 ```
+
+For supervized classification, we compare the following seeds `[42, 123, 4567, 8910, 13579, 24680, 98765, 54321, 11111, 99999]` and aggregate average and standard deviation of F1 scores over seeds.
 
 ### For Inference testing of a model
 Run the following command
@@ -162,11 +163,7 @@ For a detailed mathematical breakdown of PMI and its role in importance assessme
 #### A. Token Masking
 The process involves randomly masking a certain percentage of words in a given Tokenized sentence (usually 15%) and training a model to predict the original words based on the surrounding context. The masked tokens are replaced with a [MASK] token for BERT (\<mask\> for roBERTa), and the original tokens are stored as targets for prediction.
 
-<!-- ##### 1. Static Token Masking: -->
 We employ a Static Token masking strategy; The masked tokens are selected once during data preprocessing and remain the same across all training epochs to ensure consistency.
-<!-- ##### 2. Dynamic Token Masking:
-The masked tokens are randomly selected at each pre-training epoch, exposing the model to diverse masking patterns and improving generalization. -->
-
 
 #### B. Training Dataset preparation
 In the dataset,  the ground-truth token IDs, masked in the inputs, are present in the label tensor and all other tokens are ignored (set to -100) by the default behaviour of nn.CrossEntropyLoss\(\) as illustrated:
@@ -189,7 +186,7 @@ For a detailed mathematical breakdown of weighted loss optimisation, refer to [t
 
 ### III. Downstream Performance Evaluation
 
-To assess the impact of our pretraining approach, we fine-tune the trained models on downstream tasks. We evaluate their performance on supervised classification for SUD detection and test their NLI capabilities on benchmark datasets.
+To assess the impact of our pretraining approach, we fine-tune the trained models on downstream tasks. We evaluate their performance on supervised classification for SUD detection benchmark datasets.
 
 #### 1. Supervised Socially Unacceptable Discourse Classification
 
@@ -198,7 +195,7 @@ We fine-tune the models on a collection of datasets focused on detecting hateful
 	•	**Objective:** Measure whether pretraining with importance weighted masking improves classification accuracy compared to baseline models trained with standard MLM.
 	•	**Metrics:** We report macro-F1, accuracy, and precision-recall curves to capture overall performance and class-specific behavior.
 
-#### 2. NLI Zero-Shot Classification Performance
+<!-- #### 2. NLI Zero-Shot Classification Performance
 
 To evaluate general language understanding capabilities, we fine-tune our models using three widely used NLI datasets and test them as zero-shot classifiers:
 
@@ -207,16 +204,15 @@ To evaluate general language understanding capabilities, we fine-tune our models
 * **SNLI (Stanford NLI):** A collection of human-written sentence pairs annotated for textual entailment.
 
 By evaluating the models across both SUD classification and NLI tasks, we aim to understand how our Importance based masking strategy affects both domain-specific performance and general linguistic capabilities.
-
+ -->
 
 
 ## Acknowledgements
+
+![ARENAS Project EU](https://github.com/ARENAS-Project-EU/Graph_Structure_Learning/blob/main/plots/Arenas-final-GIF.gif)
+
 This work was conducted as part of the European [Arenas](https://arenasproject.eu/) project, funded by Horizon Europe.
 Its objective is to characterize, measure, and understand the role of extremist narratives in discourses that have an impact not only on political and social spheres but importantly on the stakeholders themselves.  Leading an innovative and ambitious research program, ARENAS will significantly contribute to filling the gap in contemporary research, make recommendations to policymakers, media, lawyers, social inclusion professionals, and educational institutions, and propose solutions for countering extreme narratives for developing more inclusive and respectful European societies.
-
-<p align="center">
-  <img src="https://github.com/rayaneghilene/ARENAS/blob/main/DSML_Research_Project/Images/Arenas-final-GIF.gif" width=100% >
-</p>
 
 ## Contributing
 We welcome contributions from the community to enhance work. If you have ideas for features, improvements, or bug fixes, please submit a pull request or open an issue on GitHub.

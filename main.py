@@ -1,45 +1,98 @@
 import argparse
 import torch
 import os
-from utils.evaluate import train_model, finetune_model, finetune_supervised_classifier
+import signal
+from utils.evaluate import load_model, train_model
+import torch.nn.functional as F
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+checkpoint_path = None
+
+def save_checkpoint(model, tokenizer, save_path):
+    """Save a checkpoint for the model and tokenizer."""
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    checkpoint_file = os.path.join(save_path, "checkpoint.pth")
+    torch.save({'model_state_dict': model.state_dict(), 'tokenizer': tokenizer}, checkpoint_file)
+    print(f"Checkpoint saved at {checkpoint_file}")
+
+def signal_handler(sig, frame):
+    """Handle signals for graceful termination."""
+    if checkpoint_path and model and tokenizer:
+        print("Signal received, saving checkpoint...")
+        save_checkpoint(model, tokenizer, checkpoint_path)
+    exit(0)
+
+# Register signal handlers for SLURM time limit or manual interruption
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+def main(model_name, save_path, loss_strategy, masking_strategy, dataset_path,  mask_prob, precomputed_csv_path=None):   
+    global checkpoint_path, model, tokenizer
+    checkpoint_path = save_path  # Set global checkpoint path
+    
+    try:
+        # Check if a checkpoint exists
+        checkpoint_file = os.path.join(save_path, "checkpoint.pth")
+        if os.path.exists(checkpoint_file):
+            print(f"Loading checkpoint from {checkpoint_file}...")
+            checkpoint = torch.load(checkpoint_file)
+            model, tokenizer = load_model(model_name)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            tokenizer = checkpoint['tokenizer']
+            print("Checkpoint loaded successfully.")
+        else:
+            print("No checkpoint found, loading model from scratch.")
+            model, tokenizer = load_model(model_name)
+        
+        # Ensure save_path exists
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        
+        # Train the model
+        train_model(model, tokenizer, loss_strategy=loss_strategy, 
+                    masking_strategy=masking_strategy, save_path=save_path, 
+                    dataset_path=dataset_path, mask_prob=mask_prob, precomputed_csv_path=precomputed_csv_path)
+        
+        # Save the final model and tokenizer
+        save_checkpoint(model, tokenizer, save_path)
+    
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        if model and tokenizer:
+            print("Saving checkpoint due to error...")
+            save_checkpoint(model, tokenizer, save_path)
+        raise
+
 
 if __name__ == "__main__":
-    # argument parser
     parser = argparse.ArgumentParser(description="Train and fine-tune a model with a specific dataset.")
-    parser.add_argument("--experiment_name", type=str, required=True, choices=['finetune_nli','supervised_classification', 'train'])
-    parser.add_argument("--GPU", type=int, help="The number of the GPU shoud be passed in as an str.")
-    parser.add_argument("--model_name", type=str, choices=['roberta', 'bert', 'electra'],  help="Model Name.")
-    parser.add_argument("--pretrained_model_path", type=str, help="Path to the pretrained model.")
-    parser.add_argument("--dataset_path", type=str, help="Path to your dataset.")
-    parser.add_argument("--masking_strategy", default='PMI' , type=str, choices=['PMI', 'BERTopic'],  help="Masking Strategy.")
-    parser.add_argument("--loss_strategy", type=str, default='weighted', choices=['weighted', 'none'],  help="Masking Strategy.")
-    parser.add_argument("--nli_dataset_name", type=str,  choices=['mnli', 'qnli', 'snli'], help="Dataset to be used for fine-tuning (e.g., 'mnli', 'qnli', 'snli').")
-    parser.add_argument("--save_path", default='./Trained_models/' ,  type=str, help="Path to save the pretrained model and tokenizer.")    
+    parser.add_argument("--model_name", type=str, required=True, 
+                        choices=['roberta-large','roberta-base', 'bert-large', 'bert-base','electra-generator', 'electra-discriminator'],  
+                        help="Model Name.")
+    parser.add_argument("--dataset_path", type=str, required=True,  
+                        help="Path to your dataset.")
+    parser.add_argument("--masking_strategy", type=str, required=True, 
+                        choices=['PMI', 'LDA', 'BERTopic'],  
+                        help="Masking Strategy.")
+    parser.add_argument("--loss_strategy", type=str, default='weighted', 
+                        choices=['weighted', 'none'],  
+                        help="Loss Strategy.")
+    parser.add_argument("--save_path", type=str, required=True, 
+                        help="Path to save the pretrained model and tokenizer.")
+    parser.add_argument("--precomputed_csv", type=str, default=None, 
+                    help="Path to the precomputed CSV file containing PMI scores.")
+    parser.add_argument("--mask_prob", type=float, default=0.15, 
+                        help="Probability of masking a token.")
     args = parser.parse_args()
+    main(model_name=args.model_name, save_path=args.save_path,
+         loss_strategy=args.loss_strategy, masking_strategy=args.masking_strategy, 
+         dataset_path=args.dataset_path, mask_prob=args.mask_prob, precomputed_csv_path=args.precomputed_csv)
 
-    if args.GPU:
-        print(f"GPU argument passed: {args.GPU}")
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
-            print(f"Using GPU {args.GPU} for training.")
-            device = torch.device("cuda")
-    else:
-        print("No GPU argument was passed, using CPU for training.")
-        device = torch.device("cpu")
 
-    ## Check if save path exists    
-    if args.save_path:
-        print(f"Saving models to {args.save_path}")
-    else:
-        os.makedirs(args.save_path, exist_ok=True)
-        print(f"Saving models to {args.save_path}")
 
-    if args.experiment_name == 'finetune_nli':
-        finetune_model(args.model_path, save_path=args.save_path,  dataset_name=args.dataset_name, output_dir='./output', logging_dir='./logs')
-    
-    elif args.experiment_name == 'supervised_classification':
-        finetune_supervised_classifier(args.pretrained_model_path, dataset_path=args.dataset_path, save_path=args.save_path)
 
-    elif args.experiment_name == 'train':
-        train_model(args.model_name, loss_strategy=args.loss_strategy, masking_strategy=args.masking_strategy, save_path=args.save_path, dataset_path=args.dataset_path, device=device)
+
+
